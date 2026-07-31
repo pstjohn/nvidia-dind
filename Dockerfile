@@ -11,21 +11,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         iptables \
         gnupg
 
-# NVIDIA Container Toolkit & Docker
+# CUDA 13.1 forward-compatibility libraries allow this image to use the
+# CUDA 13.1 userspace API with the Lepton nodes' R550 host driver.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    distribution=$(. /etc/os-release;echo $ID$VERSION_ID) && \
+    apt-get update && \
+    apt-get install -y cuda-compat-13-1 && \
+    printf '%s\n' /usr/local/cuda-13.1/compat > /etc/ld.so.conf.d/cuda-compat-13-1.conf && \
+    ldconfig
+
+# NVIDIA Container Toolkit and the nested Docker daemon.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && \
     curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
         | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
         | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
     apt-get update && \
-    apt-get install -y nvidia-container-toolkit docker.io
+    apt-get install -y nvidia-container-toolkit docker.io && \
+    nvidia-ctk runtime configure --runtime=docker --set-as-default
 
-# missing dockremap user
-
-ENV DOCKER_TLS_CERTDIR=/certs
-RUN mkdir /certs /certs/client && chmod 1777 /certs /certs/client
+ENV DOCKER_TLS_CERTDIR=""
 
 # https://github.com/docker-library/docker
 ADD https://raw.githubusercontent.com/docker-library/docker/master/modprobe.sh /usr/local/bin/modprobe
