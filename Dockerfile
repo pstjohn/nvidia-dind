@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM docker.io/nvidia/cuda:13.1.1-runtime-ubuntu24.04
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -9,7 +10,60 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         openssh-client \
         curl \
         iptables \
-        gnupg
+        gnupg \
+        build-essential \
+        git \
+        gh \
+        htop \
+        jq \
+        less \
+        procps \
+        python3 \
+        python3-venv \
+        ripgrep \
+        rsync \
+        sudo \
+        tini \
+        tmux \
+        unzip \
+        util-linux \
+        vim \
+        xz-utils
+
+# Node LTS includes npm; distro Node is too old for the coding agents.
+ARG NODE_VERSION=24.21.0
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) exit 1 ;; \
+    esac; \
+    archive="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+    work="$(mktemp -d)"; \
+    cd "$work"; \
+    curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/${archive}"; \
+    curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt"; \
+    grep " ${archive}$" SHASUMS256.txt | sha256sum --check --strict; \
+    tar -xJf "$archive" --strip-components=1 -C /usr/local; \
+    cd /; rm -rf "$work"; \
+    node --version; npm --version
+
+ARG PI_VERSION=1.0.0
+ARG PASEO_VERSION=0.10.3
+RUN npm install --global \
+        --allow-scripts=esbuild,node-pty,@google/genai,protobufjs \
+        "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+        "@getpaseo/cli@${PASEO_VERSION}" && \
+    npm cache clean --force
+
+# Keep Python CLIs isolated from Ubuntu's externally managed Python.
+# AWS CLI v1 matches existing provisioning and includes `aws s3` / PBSS support.
+ARG AWSCLI_VERSION=1.46.1
+ARG LEPTONAI_VERSION=0.27.3
+RUN python3 -m venv /opt/awscli && \
+    /opt/awscli/bin/pip install --no-cache-dir "awscli==${AWSCLI_VERSION}" && \
+    ln -s /opt/awscli/bin/aws /usr/local/bin/aws && \
+    python3 -m venv /opt/leptonai && \
+    /opt/leptonai/bin/pip install --no-cache-dir "leptonai==${LEPTONAI_VERSION}" && \
+    ln -s /opt/leptonai/bin/lep /usr/local/bin/lep
 
 # NVIDIA Container Toolkit & Docker
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -34,6 +88,11 @@ ADD https://raw.githubusercontent.com/docker-library/docker/master/docker-entryp
 ADD https://raw.githubusercontent.com/moby/moby/master/hack/dind /usr/local/bin/dind
 
 RUN chmod +x /usr/local/bin/dockerd-entrypoint.sh /usr/local/bin/docker-entrypoint.sh /usr/local/bin/dind
+
+# AWS CLI v1's built-in help renderer requires groff.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y groff
 
 VOLUME /var/lib/docker
 EXPOSE 2375 2376
